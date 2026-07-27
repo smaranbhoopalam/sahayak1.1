@@ -102,7 +102,6 @@ interface ProfilePanelProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
 export const ProfilePanel: React.FC<ProfilePanelProps> = ({ isOpen, onClose }) => {
   const [profile, setProfile] = useState<ProfileData>(defaultProfile);
   const [editMode, setEditMode] = useState(false);
@@ -112,18 +111,58 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ isOpen, onClose }) =
 
   const { setDisplayName, setPatientPhone } = useProfile();
 
+  // Load from database on mount/open
+  React.useEffect(() => {
+    if (isOpen) {
+      fetch('http://localhost:8000/api/patients/PAT-101')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.name) {
+            const mappedData: ProfileData = {
+              ...defaultProfile,
+              name: data.name,
+              phone: data.phone,
+              surgery: data.procedure,
+              hospital: data.hospital,
+              doctor: data.doctor_name,
+            };
+            setProfile(mappedData);
+            setDraft(mappedData);
+          }
+        })
+        .catch((err) => console.error('Failed to load profile from DB:', err));
+    }
+  }, [isOpen]);
+
   const handleEdit = () => {
     setDraft({ ...profile });
     setEditMode(true);
   };
 
-  const handleSave = () => {
-    setProfile({ ...draft });
-    setDisplayName(draft.name); // sync Header avatar letter
-    setPatientPhone(draft.phone); // sync phone number globally for IVR call check-in
-    setEditMode(false);
-    setShowSuccess(true);
-    setTimeout(() => setShowSuccess(false), 3200);
+  const handleSave = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/patients/PAT-101', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: draft.name,
+          phone: draft.phone,
+          procedure: draft.surgery,
+          hospital: draft.hospital,
+          doctor_name: draft.doctor,
+        }),
+      });
+      if (res.ok) {
+        setProfile({ ...draft });
+        setDisplayName(draft.name); // sync Header avatar letter
+        setPatientPhone(draft.phone); // sync phone number globally for IVR call check-in
+        setEditMode(false);
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3200);
+      }
+    } catch (err) {
+      console.error('Failed to save profile to DB:', err);
+    }
   };
 
   const handleCancel = () => {

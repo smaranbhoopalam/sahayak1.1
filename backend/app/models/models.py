@@ -16,6 +16,9 @@ class Patient(Base):
     preferred_comm = Column(String, default="IVR") # IVR, SMS, Both
     hospital = Column(String, default="AIIMS New Delhi")
     doctor_name = Column(String, default="Dr. Ananya Roy")
+    age = Column(Integer, default=45)
+    risk_level = Column(String, default="low")
+    recovery_status = Column(String, default="Optimal Progress")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     sessions = relationship("RecoverySession", back_populates="patient")
@@ -88,3 +91,36 @@ class RecoverySummary(Base):
     healing_status = Column(String, nullable=False)
     risk_level = Column(String, nullable=False) # low, medium, high, critical
     digital_twin_updated_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class SMSLog(Base):
+    __tablename__ = "sms_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    patient_name = Column(String, nullable=False)
+    phone_number = Column(String, nullable=False, index=True)
+    message = Column(Text, nullable=False)
+    sent_time = Column(DateTime, default=datetime.datetime.utcnow)
+    status = Column(String, default="Sending") # Sending, Sent, Delivered, Failed
+    reply = Column(Text, nullable=True)
+    recovery_updated = Column(Boolean, default=False)
+
+class SMSReply(Base):
+    __tablename__ = "sms_replies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sms_log_id = Column(Integer, ForeignKey("sms_logs.id"), nullable=False)
+    message = Column(Text, nullable=False)
+    received_time = Column(DateTime, default=datetime.datetime.utcnow)
+
+class DigitalTwinUpdate(Base):
+    __tablename__ = "digital_twin_updates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    patient_id = Column(String, nullable=False)
+    confidence_score = Column(Float, nullable=False)
+    drift_index = Column(Float, nullable=False)
+    pain_score = Column(Integer, nullable=False)
+    mobility = Column(String, nullable=False)
+    healing_status = Column(String, nullable=False)
+    risk_level = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)

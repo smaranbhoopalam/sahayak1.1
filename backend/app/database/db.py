@@ -33,7 +33,10 @@ def init_db():
                 preferred_language="en",
                 preferred_comm="Both",
                 hospital="AIIMS New Delhi",
-                doctor_name="Dr. Ananya Roy"
+                doctor_name="Dr. Ananya Roy",
+                age=45,
+                risk_level="low",
+                recovery_status="Optimal Progress"
             ),
             Patient(
                 id="PAT-102",
@@ -44,7 +47,10 @@ def init_db():
                 preferred_language="hi",
                 preferred_comm="IVR",
                 hospital="AIIMS New Delhi",
-                doctor_name="Dr. Ananya Roy"
+                doctor_name="Dr. Ananya Roy",
+                age=62,
+                risk_level="medium",
+                recovery_status="Requires Observation"
             ),
             Patient(
                 id="PAT-103",
@@ -55,7 +61,10 @@ def init_db():
                 preferred_language="en",
                 preferred_comm="SMS",
                 hospital="Fortis Healthcare",
-                doctor_name="Dr. Ananya Roy"
+                doctor_name="Dr. Ananya Roy",
+                age=28,
+                risk_level="low",
+                recovery_status="Optimal Progress"
             ),
             Patient(
                 id="PAT-105",
@@ -66,7 +75,10 @@ def init_db():
                 preferred_language="hi",
                 preferred_comm="IVR",
                 hospital="Max Super Speciality",
-                doctor_name="Dr. Ananya Roy"
+                doctor_name="Dr. Ananya Roy",
+                age=55,
+                risk_level="high",
+                recovery_status="Significant Lag"
             ),
             Patient(
                 id="PAT-109",
@@ -77,7 +89,10 @@ def init_db():
                 preferred_language="en",
                 preferred_comm="IVR",
                 hospital="AIIMS New Delhi",
-                doctor_name="Dr. Ananya Roy"
+                doctor_name="Dr. Ananya Roy",
+                age=34,
+                risk_level="low",
+                recovery_status="Optimal Progress"
             ),
         ]
         db.add_all(initial_patients)

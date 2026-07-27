@@ -41,9 +41,9 @@ class DigitalTwinUpdatePayload(BaseModel):
     confidence_score: float
     drift_index: float
     pain_score: int
-    mobility: string
-    healing_status: string
-    risk_level: string
+    mobility: str
+    healing_status: str
+    risk_level: str
     timeline_entry: str
     doctor_notification: str
 
@@ -67,6 +67,63 @@ class PatientSchema(BaseModel):
     preferred_comm: str
     hospital: str
     doctor_name: str
+    age: int
+    risk_level: str
+    recovery_status: str
+
+    class Config:
+        from_attributes = True
+
+class PatientCreate(BaseModel):
+    id: str
+    name: str
+    phone: str
+    procedure: str
+    recovery_day: int
+    preferred_language: str
+    preferred_comm: str
+    hospital: str
+    doctor_name: str
+    age: int
+    risk_level: Optional[str] = "low"
+    recovery_status: Optional[str] = "Optimal Progress"
+
+class PatientUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    procedure: Optional[str] = None
+    recovery_day: Optional[int] = None
+    preferred_language: Optional[str] = None
+    preferred_comm: Optional[str] = None
+    hospital: Optional[str] = None
+    doctor_name: Optional[str] = None
+    age: Optional[int] = None
+    risk_level: Optional[str] = None
+    recovery_status: Optional[str] = None
+
+class SMSHistorySchema(BaseModel):
+    id: int
+    patient_name: str
+    phone_number: str
+    message: str
+    sent_time: datetime
+    status: str
+    reply: Optional[str] = None
+    recovery_updated: bool
+
+    class Config:
+        from_attributes = True
+
+class SendSMSRequest(BaseModel):
+    patient_id: str
+    phone_number: str
+
+class SendSMSResponse(BaseModel):
+    success: bool
+    status: str
+    message: str
+    delivery_status: str
+    timestamp: str
 
 class IVRDashboardStats(BaseModel):
     calls_today: int

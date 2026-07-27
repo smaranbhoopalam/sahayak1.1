@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database.db import init_db
 from app.api.ivr_routes import router as ivr_router
+from app.api.sms_routes import router as sms_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sahayak.main")
@@ -37,3 +38,4 @@ def root():
     }
 
 app.include_router(ivr_router)
+app.include_router(sms_router)

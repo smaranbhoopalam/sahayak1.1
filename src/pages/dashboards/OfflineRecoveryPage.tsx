@@ -6,84 +6,33 @@ import {
   CheckCircle2, UserCheck, X, Search
 } from 'lucide-react';
 import { Card } from '../../components/common/Card';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 interface OfflinePatient {
   id: string;
   name: string;
   phone: string;
   procedure: string;
-  recoveryDay: number;
-  language: string; // English, Hindi, Kannada
-  commMode: 'IVR' | 'SMS' | 'Both';
+  recovery_day: number;
+  preferred_language: string;
+  preferred_comm: string;
   hospital: string;
-  lastCallStatus: 'Completed' | 'Pending' | 'Failed';
-  confidenceScore: number;
+  doctor_name: string;
+  age: number;
+  risk_level: string;
+  recovery_status: string;
 }
 
-const mockOfflinePatients: OfflinePatient[] = [
-  {
-    id: 'PAT-101',
-    name: 'Rahul Sharma',
-    phone: '+91 98765 43210',
-    procedure: 'Post-ACL Reconstruction',
-    recoveryDay: 12,
-    language: 'English',
-    commMode: 'Both',
-    hospital: 'AIIMS New Delhi',
-    lastCallStatus: 'Completed',
-    confidenceScore: 92,
-  },
-  {
-    id: 'PAT-102',
-    name: 'Priya Patel',
-    phone: '+91 91234 56789',
-    procedure: 'Total Knee Replacement',
-    recoveryDay: 17,
-    language: 'Hindi (हिंदी)',
-    commMode: 'IVR',
-    hospital: 'AIIMS New Delhi',
-    lastCallStatus: 'Pending',
-    confidenceScore: 58,
-  },
-  {
-    id: 'PAT-103',
-    name: 'Amit Verma',
-    phone: '+91 99887 76655',
-    procedure: 'Laparoscopic Appendectomy',
-    recoveryDay: 7,
-    language: 'English',
-    commMode: 'SMS',
-    hospital: 'Fortis Healthcare',
-    lastCallStatus: 'Completed',
-    confidenceScore: 81,
-  },
-  {
-    id: 'PAT-105',
-    name: 'Vikram Singh',
-    phone: '+91 98100 99887',
-    procedure: 'Coronary Artery Bypass (CABG)',
-    recoveryDay: 19,
-    language: 'Hindi (हिंदी)',
-    commMode: 'IVR',
-    hospital: 'Max Super Speciality',
-    lastCallStatus: 'Completed',
-    confidenceScore: 61,
-  },
-  {
-    id: 'PAT-109',
-    name: 'Karan Mehta',
-    phone: '+91 95432 10987',
-    procedure: 'Meniscus Repair',
-    recoveryDay: 21,
-    language: 'Kannada (ಕನ್ನಡ)',
-    commMode: 'IVR',
-    hospital: 'AIIMS New Delhi',
-    lastCallStatus: 'Failed',
-    confidenceScore: 66,
-  },
-];
-
-import { useProfile } from '../../context/ProfileContext';
+interface SMSLog {
+  id: number;
+  patient_name: string;
+  phone_number: string;
+  message: string;
+  sent_time: string;
+  status: string;
+  reply: string | null;
+  recovery_updated: boolean;
+}
 
 const ivrQuestions = [
   { step: 1, key: 'medication', text: "Question 1. Have you taken today's medicine?", options: "Press 1 for Yes | Press 2 for No" },
@@ -95,31 +44,34 @@ const ivrQuestions = [
 
 export const OfflineRecoveryPage: React.FC = () => {
   const navigate = useNavigate();
-  const { patientName, patientPhone } = useProfile();
+  const queryClient = useQueryClient();
 
-  // Dynamically map the patient roster to use context data
-  const patientsList: OfflinePatient[] = [
-    {
-      id: 'PAT-101',
-      name: patientName,
-      phone: patientPhone,
-      procedure: 'Post-ACL Reconstruction',
-      recoveryDay: 12,
-      language: 'English',
-      commMode: 'Both',
-      hospital: 'AIIMS New Delhi',
-      lastCallStatus: 'Completed',
-      confidenceScore: 92,
-    },
-    ...mockOfflinePatients.slice(1) // Keep the rest of the mock roster
-  ];
-
-  // Active Tab: dashboard | patients | ivr | sms | history | reports | settings
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'patients' | 'ivr' | 'sms' | 'history' | 'reports' | 'settings'>('dashboard');
+  // Active Tab: dashboard | patients | ivr | sms | history | settings
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'patients' | 'ivr' | 'sms' | 'history' | 'settings'>('dashboard');
 
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState<string>('All');
+
+  // React Query: Fetch Patients from backend database
+  const { data: patientsList = [] } = useQuery<OfflinePatient[]>({
+    queryKey: ['patients'],
+    queryFn: async () => {
+      const res = await fetch('http://localhost:8000/api/patients');
+      if (!res.ok) throw new Error('Failed to fetch patients');
+      return res.json();
+    }
+  });
+
+  // React Query: Fetch SMS Logs
+  const { data: smsHistory = [] } = useQuery<SMSLog[]>({
+    queryKey: ['smsHistory'],
+    queryFn: async () => {
+      const res = await fetch('http://localhost:8000/api/sms/history');
+      if (!res.ok) throw new Error('Failed to fetch SMS history');
+      return res.json();
+    }
+  });
 
   // Live Call Modal State
   const [activeCallPatient, setActiveCallPatient] = useState<OfflinePatient | null>(null);
@@ -141,131 +93,46 @@ export const OfflineRecoveryPage: React.FC = () => {
     return () => clearInterval(timer);
   }, [callState]);
 
-  // Chat simulator state
-  const [selectedChatPatient, setSelectedChatPatient] = useState<OfflinePatient | null>(null);
-  const [chatSession, setChatSession] = useState<any>(null);
-  const [chatMode, setChatMode] = useState<'SMS' | 'WhatsApp'>('WhatsApp');
-  const [chatInputText, setChatInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  // SMS status state
+  const [selectedSMSPatient, setSelectedSMSPatient] = useState<OfflinePatient | null>(null);
+  const [smsStatus, setSmsStatus] = useState<'idle' | 'sending' | 'success' | 'failed'>('idle');
+  const [smsTimestamp, setSmsTimestamp] = useState('');
 
-  const handleStartChat = async (patient: OfflinePatient, mode: 'SMS' | 'WhatsApp') => {
-    setSelectedChatPatient(patient);
-    setChatMode(mode);
-    setChatInputText('');
-    setIsTyping(false);
-    
-    try {
-      const res = await fetch('http://localhost:8000/api/chat/start', {
+  // Mutation to send SMS via Exotel using React Query
+  const sendSMSMutation = useMutation({
+    mutationFn: async (patient: OfflinePatient) => {
+      const res = await fetch('http://localhost:8000/api/sms/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           patient_id: patient.id,
-          phone_number: patient.phone,
-          mode
+          phone_number: patient.phone
         })
       });
-      const data = await res.json();
+      if (!res.ok) throw new Error('Failed to send SMS');
+      return res.json();
+    },
+    onMutate: () => {
+      setSmsStatus('sending');
+    },
+    onSuccess: (data) => {
       if (data.success) {
-        setChatSession(data.session);
+        setSmsStatus('success');
+        setSmsTimestamp(data.timestamp);
+        // Refresh SMS history and patients list immediately
+        queryClient.invalidateQueries({ queryKey: ['smsHistory'] });
+        queryClient.invalidateQueries({ queryKey: ['patients'] });
+      } else {
+        setSmsStatus('failed');
       }
-    } catch (e) {
-      // Fallback local mock simulation
-      setChatSession({
-        sessionId: `MOCK-CHAT-${Date.now().toString().slice(-4)}`,
-        patient_id: patient.id,
-        phone_number: patient.phone,
-        mode,
-        currentStep: 1,
-        answers: {},
-        messages: [
-          {
-            id: 'msg-init-1',
-            sender: 'bot',
-            text: `Hello! This is Sahayak Care Assistant. Let's do your daily recovery check-in.`,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          },
-          {
-            id: 'msg-init-2',
-            sender: 'bot',
-            text: ivrQuestions[0].text + '\n' + ivrQuestions[0].options,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          }
-        ]
-      });
+    },
+    onError: () => {
+      setSmsStatus('failed');
     }
-  };
+  });
 
-  const handleSendMessage = async (textToSend?: string) => {
-    const msgText = textToSend || chatInputText;
-    if (!msgText.trim() || !chatSession) return;
-
-    if (!textToSend) setChatInputText('');
-
-    // Optimistically add user message
-    const updatedMessages = [
-      ...chatSession.messages,
-      {
-        id: 'msg-user-' + Date.now(),
-        sender: 'user',
-        text: msgText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      }
-    ];
-
-    setChatSession({
-      ...chatSession,
-      messages: updatedMessages
-    });
-
-    setIsTyping(true);
-
-    try {
-      const res = await fetch('http://localhost:8000/api/chat/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: chatSession.sessionId,
-          text: msgText
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setChatSession(data.session);
-      }
-    } catch (e) {
-      // Local fallback simulation logic
-      setTimeout(() => {
-        const nextStep = chatSession.currentStep + 1;
-        const botMessages = [...updatedMessages];
-        const answers = { ...chatSession.answers, [ivrQuestions[chatSession.currentStep - 1].key]: msgText };
-        
-        if (nextStep <= ivrQuestions.length) {
-          const nextQ = ivrQuestions[nextStep - 1];
-          botMessages.push({
-            id: 'msg-bot-' + Date.now(),
-            sender: 'bot',
-            text: `${nextQ.text}\n${nextQ.options}`,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          });
-        } else {
-          botMessages.push({
-            id: 'msg-bot-final',
-            sender: 'bot',
-            text: 'Thank you! All your recovery responses have been successfully synced to your doctor\'s dashboard. Goodbye!',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          });
-        }
-
-        setChatSession({
-          ...chatSession,
-          currentStep: nextStep,
-          messages: botMessages,
-          answers
-        });
-      }, 1000);
-    } finally {
-      setTimeout(() => setIsTyping(false), 1000);
-    }
+  const triggerSendSMS = (patient: OfflinePatient) => {
+    sendSMSMutation.mutate(patient);
   };
 
   // Initiate Call function connecting to backend API
@@ -278,7 +145,6 @@ export const OfflineRecoveryPage: React.FC = () => {
     setCallLogs([`[00:00] Initiating Exotel IVR outbound voice call to ${patient.phone}...`]);
 
     try {
-      // Call Exotel Backend Endpoint
       const res = await fetch('http://localhost:8000/api/ivr/start-call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -293,7 +159,7 @@ export const OfflineRecoveryPage: React.FC = () => {
 
       setTimeout(() => {
         setCallState('dialing');
-        setCallLogs((prev) => [...prev, `[00:02] Dialing ${patient.phone} via Exotel Gateway (SID: ${data.call_sid || 'EX99420'})`]);
+        setCallLogs((prev) => [...prev, `[00:02] Dialing ${patient.phone} via Exotel Gateway (SID: {data.call_sid || 'EX99420'})`]);
       }, 1200);
 
       setTimeout(() => {
@@ -305,7 +171,6 @@ export const OfflineRecoveryPage: React.FC = () => {
         ]);
       }, 2800);
     } catch (err) {
-      // Fallback for standalone demo if backend is initializing
       setSessionId(`SES-${Date.now().toString().slice(-6)}`);
       setTimeout(() => setCallState('dialing'), 1200);
       setTimeout(() => {
@@ -332,7 +197,6 @@ export const OfflineRecoveryPage: React.FC = () => {
       `[00:${callDuration < 10 ? '0' + callDuration : callDuration}] DTMF Key Pressed: "${digit}" for ${currentQ.key}`,
     ]);
 
-    // Send answer to FastAPI backend
     try {
       await fetch('http://localhost:8000/api/ivr/answer', {
         method: 'POST',
@@ -352,7 +216,6 @@ export const OfflineRecoveryPage: React.FC = () => {
       setCurrentStep(currentStep + 1);
       setCallLogs((prev) => [...prev, `Prompting Q${currentStep + 1}: "${nextQ.text}"`]);
     } else {
-      // Last Step -> Finish Session
       setCallState('completed');
       setCallLogs((prev) => [
         ...prev,
@@ -361,13 +224,13 @@ export const OfflineRecoveryPage: React.FC = () => {
         `Digital Twin updated. Doctor Dashboard synced!`,
       ]);
 
-      // Call Backend Finish API
       try {
         await fetch('http://localhost:8000/api/ivr/finish', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: sessionId }),
         });
+        queryClient.invalidateQueries({ queryKey: ['patients'] });
       } catch (err) {
         // ignore
       }
@@ -377,7 +240,7 @@ export const OfflineRecoveryPage: React.FC = () => {
   // Filtered Patients List
   const filteredPatients = patientsList.filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.phone.includes(searchTerm);
-    const matchesComm = filterMode === 'All' || p.commMode === filterMode;
+    const matchesComm = filterMode === 'All' || p.preferred_comm === filterMode;
     return matchesSearch && matchesComm;
   });
 
@@ -404,8 +267,9 @@ export const OfflineRecoveryPage: React.FC = () => {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() => handleStartCall(patientsList[0])}
-            className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs transition-all shadow-lg shadow-emerald-500/25 flex items-center gap-2 shrink-0 cursor-pointer"
+            onClick={() => patientsList.length > 0 && handleStartCall(patientsList[0])}
+            disabled={patientsList.length === 0}
+            className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs transition-all shadow-lg shadow-emerald-500/25 flex items-center gap-2 shrink-0 cursor-pointer disabled:opacity-50"
           >
             <Phone className="w-4 h-4" /> Start Express IVR Call
           </button>
@@ -419,7 +283,7 @@ export const OfflineRecoveryPage: React.FC = () => {
           { id: 'patients', label: 'Patient Roster', icon: UserCheck },
           { id: 'ivr', label: 'IVR Calls Console', icon: PhoneCall },
           { id: 'sms', label: 'SMS Service', icon: MessageSquare },
-          { id: 'history', label: 'Call History', icon: History },
+          { id: 'history', label: 'Call & SMS History', icon: History },
           { id: 'settings', label: 'Telephony Settings', icon: Settings },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -493,7 +357,7 @@ export const OfflineRecoveryPage: React.FC = () => {
                     </div>
                     <div>
                       <h4 className="text-xs font-black text-slate-900">{patient.name}</h4>
-                      <p className="text-[11px] font-semibold text-slate-500">{patient.phone} • {patient.language}</p>
+                      <p className="text-[11px] font-semibold text-slate-500">{patient.phone} • {patient.preferred_language}</p>
                     </div>
                   </div>
 
@@ -504,13 +368,13 @@ export const OfflineRecoveryPage: React.FC = () => {
 
                   <div className="flex items-center gap-4">
                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                      patient.lastCallStatus === 'Completed'
+                      patient.risk_level === 'low'
                         ? 'bg-emerald-100 text-emerald-800'
-                        : patient.lastCallStatus === 'Pending'
+                        : patient.risk_level === 'medium'
                         ? 'bg-amber-100 text-amber-800'
                         : 'bg-rose-100 text-rose-800'
                     }`}>
-                      {patient.lastCallStatus}
+                      {patient.risk_level.toUpperCase()} RISK
                     </span>
 
                     <button
@@ -573,18 +437,18 @@ export const OfflineRecoveryPage: React.FC = () => {
                   </div>
                   <div>
                     <h4 className="text-sm font-black text-slate-900">{patient.name}</h4>
-                    <p className="text-[11px] font-semibold text-slate-500">{patient.phone} • {patient.hospital}</p>
+                    <p className="text-[11px] font-semibold text-slate-500">{patient.phone} • {patient.hospital} (Age {patient.age})</p>
                   </div>
                 </div>
 
                 <div>
                   <span className="text-[10px] text-slate-400 font-extrabold uppercase block">Procedure & Day</span>
-                  <span className="text-xs font-bold text-slate-800">{patient.procedure} (Day {patient.recoveryDay})</span>
+                  <span className="text-xs font-bold text-slate-800">{patient.procedure} (Day {patient.recovery_day})</span>
                 </div>
 
                 <div>
                   <span className="text-[10px] text-slate-400 font-extrabold uppercase block">Language & Mode</span>
-                  <span className="text-xs font-bold text-slate-800">{patient.language} • <span className="text-emerald-700 font-black">{patient.commMode}</span></span>
+                  <span className="text-xs font-bold text-slate-800">{patient.preferred_language} • <span className="text-emerald-700 font-black">{patient.preferred_comm}</span></span>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -614,7 +478,7 @@ export const OfflineRecoveryPage: React.FC = () => {
           <div className="lg:col-span-5 bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
             <div>
               <h3 className="text-base font-black text-slate-900">Message Triage Hub</h3>
-              <p className="text-xs text-slate-500 font-semibold">Initiate automated patient check-ins via SMS or WhatsApp</p>
+              <p className="text-xs text-slate-500 font-semibold">Initiate automated patient check-ins via SMS</p>
             </div>
             
             <div className="space-y-3">
@@ -622,7 +486,7 @@ export const OfflineRecoveryPage: React.FC = () => {
                 <div
                   key={patient.id}
                   className={`p-4 rounded-xl border transition-all flex flex-col gap-3 ${
-                    selectedChatPatient?.id === patient.id
+                    selectedSMSPatient?.id === patient.id
                       ? 'border-emerald-500 bg-emerald-50/20'
                       : 'border-slate-200/80 hover:border-slate-300'
                   }`}
@@ -637,21 +501,18 @@ export const OfflineRecoveryPage: React.FC = () => {
                         <p className="text-[10px] font-semibold text-slate-500">{patient.phone}</p>
                       </div>
                     </div>
-                    <span className="text-[10px] font-bold text-slate-400">Day {patient.recoveryDay}</span>
+                    <span className="text-[10px] font-bold text-slate-400">Day {patient.recovery_day}</span>
                   </div>
 
                   <div className="flex gap-2">
                     <button
-                      onClick={() => handleStartChat(patient, 'SMS')}
+                      onClick={() => {
+                        setSelectedSMSPatient(patient);
+                        setSmsStatus('idle');
+                      }}
                       className="flex-1 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-800 text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      <MessageSquare className="w-3 h-3" /> SMS
-                    </button>
-                    <button
-                      onClick={() => handleStartChat(patient, 'WhatsApp')}
-                      className="flex-1 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <span className="text-xs">💬</span> WhatsApp
+                      <MessageSquare className="w-3 h-3" /> Select SMS Check-in
                     </button>
                   </div>
                 </div>
@@ -659,113 +520,83 @@ export const OfflineRecoveryPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Interactive Phone Mockup */}
+          {/* SMS Status / Delivery Panel */}
           <div className="lg:col-span-7 flex flex-col items-center justify-center">
-            {chatSession ? (
-              <div className="w-full max-w-sm rounded-[3rem] border-8 border-slate-900 bg-slate-950 overflow-hidden shadow-2xl relative aspect-[9/18] flex flex-col min-h-[500px]">
-                {/* Phone Speaker & Camera Notch */}
-                <div className="absolute top-2 left-1/2 -translate-x-1/2 w-32 h-6 bg-slate-900 rounded-full z-10 flex items-center justify-center">
-                  <div className="w-12 h-1 bg-slate-800 rounded-full mr-2"></div>
-                  <div className="w-2.5 h-2.5 bg-slate-800 rounded-full"></div>
-                </div>
-
-                {/* Chat App Header */}
-                <div className={`pt-9 pb-3 px-4 flex items-center justify-between text-white border-b ${
-                  chatMode === 'WhatsApp' ? 'bg-[#075e54] border-[#075e54]' : 'bg-slate-900 border-slate-800'
-                }`}>
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-xs font-black">
-                      {selectedChatPatient?.name.charAt(0)}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black leading-none">{selectedChatPatient?.name}</h4>
-                      <span className="text-[9px] text-emerald-300 font-bold">Online</span>
-                    </div>
+            {selectedSMSPatient ? (
+              <div className="w-full max-w-md bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-6">
+                <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+                  <div className="w-10 h-10 rounded-xl bg-slate-900 text-white font-black text-xs flex items-center justify-center">
+                    {selectedSMSPatient.name.charAt(0)}
                   </div>
-                  <div className="flex items-center gap-1 text-[10px] font-bold opacity-80">
-                    <span>{chatMode} Mode</span>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900">{selectedSMSPatient.name}</h4>
+                    <p className="text-[11px] font-semibold text-slate-500">{selectedSMSPatient.phone}</p>
                   </div>
                 </div>
 
-                {/* Message Body */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5] flex flex-col">
-                  {chatSession.messages.map((msg: any) => (
-                    <div
-                      key={msg.id}
-                      className={`max-w-[75%] p-2.5 rounded-2xl text-xs relative ${
-                        msg.sender === 'bot'
-                          ? 'bg-white text-slate-800 self-start rounded-tl-none shadow-xs'
-                          : 'bg-[#dcf8c6] text-slate-800 self-end rounded-tr-none shadow-xs'
-                      }`}
-                    >
-                      <p className="whitespace-pre-line leading-relaxed">{msg.text}</p>
-                      <span className="block text-[8px] text-slate-400 text-right mt-1">{msg.timestamp}</span>
-                    </div>
-                  ))}
-                  
-                  {isTyping && (
-                    <div className="bg-white text-slate-800 self-start p-2.5 rounded-2xl rounded-tl-none shadow-xs text-xs flex items-center gap-1 max-w-[50%]">
-                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
-                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-100"></span>
-                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-200"></span>
+                <div className="space-y-4">
+                  {smsStatus === 'idle' && (
+                    <div className="text-center py-6 space-y-3">
+                      <span className="text-3xl block">📨</span>
+                      <p className="text-xs text-slate-600 font-semibold">
+                        Ready to send daily check-in message via Exotel SMS.
+                      </p>
+                      <button
+                        onClick={() => triggerSendSMS(selectedSMSPatient)}
+                        className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs transition-colors cursor-pointer"
+                      >
+                        Send Check-in SMS
+                      </button>
                     </div>
                   )}
-                </div>
 
-                {/* Preset Suggestions Quick Replies */}
-                {chatSession.currentStep <= ivrQuestions.length && !isTyping && (
-                  <div className="bg-slate-100 px-3 py-2 border-t border-slate-200 flex flex-wrap gap-1.5 justify-center">
-                    {ivrQuestions[chatSession.currentStep - 1].key === 'pain_level' ? (
-                      [1, 3, 5, 8].map((num) => (
-                        <button
-                          key={num}
-                          onClick={() => handleSendMessage(num.toString())}
-                          className="px-2.5 py-1 rounded-full bg-white hover:bg-emerald-500 hover:text-white border border-slate-300 text-[10px] font-black text-slate-700 transition-all cursor-pointer"
-                        >
-                          Pain: {num}
-                        </button>
-                      ))
-                    ) : (
-                      [
-                        { label: 'Yes (1)', value: '1' },
-                        { label: 'No (2)', value: '2' }
-                      ].map((btn) => (
-                        <button
-                          key={btn.value}
-                          onClick={() => handleSendMessage(btn.value)}
-                          className="px-3 py-1 rounded-full bg-white hover:bg-emerald-500 hover:text-white border border-slate-300 text-[10px] font-black text-slate-700 transition-all cursor-pointer"
-                        >
-                          {btn.label}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
+                  {smsStatus === 'sending' && (
+                    <div className="text-center py-6 space-y-3">
+                      <div className="w-6 h-6 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin mx-auto"></div>
+                      <p className="text-xs text-slate-600 font-extrabold animate-pulse">
+                        Sending SMS...
+                      </p>
+                    </div>
+                  )}
 
-                {/* Chat App Input */}
-                <div className="p-3 bg-slate-900 border-t border-slate-850 flex gap-2 items-center">
-                  <input
-                    type="text"
-                    placeholder="Type a message..."
-                    value={chatInputText}
-                    onChange={(e) => setChatInputText(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                    className="flex-1 bg-slate-800 border border-slate-750 text-white rounded-full px-4 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-500"
-                  />
-                  <button
-                    onClick={() => handleSendMessage()}
-                    className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition-all cursor-pointer"
-                  >
-                    🚀
-                  </button>
+                  {smsStatus === 'success' && (
+                    <div className="text-center py-6 space-y-3">
+                      <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
+                      <h4 className="text-xs font-black text-emerald-600">✓ SMS Sent Successfully</h4>
+                      <p className="text-[11px] font-semibold text-slate-500">
+                        Delivered to {selectedSMSPatient.phone}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-bold">{smsTimestamp}</p>
+                      <button
+                        onClick={() => triggerSendSMS(selectedSMSPatient)}
+                        className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                      >
+                        Send Again
+                      </button>
+                    </div>
+                  )}
+
+                  {smsStatus === 'failed' && (
+                    <div className="text-center py-6 space-y-3">
+                      <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto text-lg font-black">!</div>
+                      <h4 className="text-xs font-black text-rose-600">SMS Failed</h4>
+                      <p className="text-[10px] font-semibold text-slate-500">Could not deliver to {selectedSMSPatient.phone}</p>
+                      <button
+                        onClick={() => triggerSendSMS(selectedSMSPatient)}
+                        className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs transition-colors cursor-pointer"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
               <div className="text-center p-8 border-2 border-dashed border-slate-200 rounded-2xl max-w-sm bg-slate-50/50">
                 <span className="text-4xl block mb-2">📲</span>
-                <h4 className="text-sm font-black text-slate-800">Phone Simulator Idle</h4>
+                <h4 className="text-sm font-black text-slate-800">SMS Portal Idle</h4>
                 <p className="text-[11px] font-semibold text-slate-500 mt-1">
-                  Select a patient and choose a delivery mode (SMS or WhatsApp) on the left to start the interactive triage.
+                  Select a patient on the left to review or trigger the outbound check-in SMS.
                 </p>
               </div>
             )}
@@ -773,57 +604,104 @@ export const OfflineRecoveryPage: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 4: CALL HISTORY */}
+      {/* TAB 4: CALL & SMS HISTORY */}
       {activeTab === 'history' && (
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="space-y-6">
+          {/* SMS History Logs */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
+            <div>
+              <h3 className="text-base font-black text-slate-900">SMS Check-in History</h3>
+              <p className="text-xs text-slate-500 font-semibold">Exotel outbound logs and patient replies</p>
+            </div>
+
+            <div className="space-y-3">
+              {smsHistory.length > 0 ? (
+                smsHistory.map((log) => (
+                  <div key={log.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+                    <div className="flex justify-between items-start text-xs">
+                      <div>
+                        <span className="font-black text-slate-900">{log.patient_name}</span>
+                        <span className="text-slate-500 font-semibold ml-2">({log.phone_number})</span>
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-400">
+                        {new Date(log.sent_time).toLocaleString()}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed bg-white p-3 rounded-lg border border-slate-100">
+                      {log.message}
+                    </p>
+
+                    <div className="flex justify-between items-center text-[10px] font-extrabold pt-2 border-t border-slate-200/50">
+                      <span className="flex items-center gap-1">
+                        Status: <strong className={log.status === 'Sent' || log.status === 'Delivered' ? 'text-emerald-600' : 'text-rose-600'}>{log.status}</strong>
+                      </span>
+                      <span>
+                        Reply: <strong className="text-brand-600">{log.reply || 'No Reply Yet'}</strong>
+                      </span>
+                      <span className="text-emerald-700">
+                        {log.recovery_updated ? 'Digital Twin Updated ✓' : 'Pending Patient Reply'}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-6 text-xs text-slate-400 font-semibold">
+                  No SMS logs recorded.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Voice IVR Call Logs */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
             <div>
               <h3 className="text-base font-black text-slate-900">IVR Call History & Telemetry Logs</h3>
               <p className="text-xs text-slate-500 font-semibold">Recorded DTMF keypad answers and calculated confidence scores</p>
             </div>
-          </div>
 
-          <div className="space-y-4">
-            {patientsList.map((p) => (
-              <div key={p.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
-                <div className="flex justify-between items-center text-xs">
-                  <div>
-                    <span className="font-black text-slate-900">{p.name}</span>
-                    <span className="text-slate-500 font-semibold ml-2">({p.phone})</span>
+            <div className="space-y-4">
+              {patientsList.map((p) => (
+                <div key={p.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                  <div className="flex justify-between items-center text-xs">
+                    <div>
+                      <span className="font-black text-slate-900">{p.name}</span>
+                      <span className="text-slate-500 font-semibold ml-2">({p.phone})</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-400">July 27, 2026 • 09:30 AM</span>
                   </div>
-                  <span className="text-[10px] font-bold text-slate-400">July 27, 2026 • 09:30 AM</span>
-                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 text-[11px] font-semibold">
-                  <div className="p-2 bg-white rounded-lg border border-slate-200">
-                    <span className="text-[9px] text-slate-400 block font-bold">1. Medicine Taken</span>
-                    <span className="font-black text-emerald-700">Yes (Key 1)</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 text-[11px] font-semibold">
+                    <div className="p-2 bg-white rounded-lg border border-slate-200">
+                      <span className="text-[9px] text-slate-400 block font-bold">1. Medicine Taken</span>
+                      <span className="font-black text-emerald-700">Yes (Key 1)</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-slate-200">
+                      <span className="text-[9px] text-slate-400 block font-bold">2. Pain Score</span>
+                      <span className="font-black text-slate-800">3/10 (Key 3)</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-slate-200">
+                      <span className="text-[9px] text-slate-400 block font-bold">3. Exercises Done</span>
+                      <span className="font-black text-emerald-700">Yes (Key 1)</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-slate-200">
+                      <span className="text-[9px] text-slate-400 block font-bold">4. Swelling Level</span>
+                      <span className="font-black text-amber-700">Mild (Key 1)</span>
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-slate-200">
+                      <span className="text-[9px] text-slate-400 block font-bold">5. Doctor Callback</span>
+                      <span className="font-black text-slate-500">No (Key 2)</span>
+                    </div>
                   </div>
-                  <div className="p-2 bg-white rounded-lg border border-slate-200">
-                    <span className="text-[9px] text-slate-400 block font-bold">2. Pain Score</span>
-                    <span className="font-black text-slate-800">3/10 (Key 3)</span>
-                  </div>
-                  <div className="p-2 bg-white rounded-lg border border-slate-200">
-                    <span className="text-[9px] text-slate-400 block font-bold">3. Exercises Done</span>
-                    <span className="font-black text-emerald-700">Yes (Key 1)</span>
-                  </div>
-                  <div className="p-2 bg-white rounded-lg border border-slate-200">
-                    <span className="text-[9px] text-slate-400 block font-bold">4. Swelling Level</span>
-                    <span className="font-black text-amber-700">Mild (Key 1)</span>
-                  </div>
-                  <div className="p-2 bg-white rounded-lg border border-slate-200">
-                    <span className="text-[9px] text-slate-400 block font-bold">5. Doctor Callback</span>
-                    <span className="font-black text-slate-500">No (Key 2)</span>
-                  </div>
-                </div>
 
-                <div className="flex justify-between items-center text-[10px] font-extrabold pt-2 border-t border-slate-200 text-slate-600">
-                  <span>Confidence Score: <strong className="text-emerald-600">92.0%</strong></span>
-                  <span>Drift Index: <strong className="text-slate-800">0.8</strong></span>
-                  <span className="text-emerald-700">Digital Twin Updated ✨</span>
+                  <div className="flex justify-between items-center text-[10px] font-extrabold pt-2 border-t border-slate-200 text-slate-600">
+                    <span>Confidence Score: <strong className="text-emerald-600">92.0%</strong></span>
+                    <span>Drift Index: <strong className="text-slate-800">0.8</strong></span>
+                    <span className="text-emerald-700">Digital Twin Updated ✨</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -875,7 +753,7 @@ export const OfflineRecoveryPage: React.FC = () => {
 
                 {callState === 'connected' && (
                   <div className="text-xs text-slate-300 font-semibold pt-1">
-                    Language: <span className="text-emerald-400 font-bold">{activeCallPatient.language}</span> • Provider: <span className="text-brand-400 font-bold">Exotel Voice API</span>
+                    Language: <span className="text-emerald-400 font-bold">{activeCallPatient.preferred_language}</span> • Provider: <span className="text-brand-400 font-bold">Exotel Voice API</span>
                   </div>
                 )}
               </div>
