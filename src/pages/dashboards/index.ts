@@ -1,0 +1,9 @@
+export { PatientDashboard } from './PatientDashboard';
+export { DailyUpdatePage } from './DailyUpdatePage';
+export { PatientTimelinePage } from './PatientTimelinePage';
+export { PatientReportPage } from './PatientReportPage';
+export { DoctorDashboard } from './DoctorDashboard';
+export { DoctorPatientDetailsPage } from './DoctorPatientDetailsPage';
+export { GuardianDashboard } from './GuardianDashboard';
+export { AdminDashboard } from './AdminDashboard';
+export { DigitalTwinPage } from './DigitalTwinPage';
