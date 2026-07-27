@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 interface ProfileContextType {
   displayName: string;       // first name for avatar initial
@@ -19,8 +19,21 @@ const ProfileContext = createContext<ProfileContextType>({
 });
 
 export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [patientName, setPatientNameState] = useState('Rahul Sharma');
-  const [patientPhone, setPatientPhone] = useState('+91 98765 43210');
+  const [patientName, setPatientNameState] = useState(() => {
+    return localStorage.getItem('sahayak_patient_name') || 'Rahul Sharma';
+  });
+  const [patientPhone, setPatientPhoneState] = useState(() => {
+    return localStorage.getItem('sahayak_patient_phone') || '+91 98765 43210';
+  });
+
+  // Persist to localStorage whenever state changes
+  useEffect(() => {
+    localStorage.setItem('sahayak_patient_name', patientName);
+  }, [patientName]);
+
+  useEffect(() => {
+    localStorage.setItem('sahayak_patient_phone', patientPhone);
+  }, [patientPhone]);
 
   // displayName always stays in sync with patientName
   const setPatientName = (name: string) => {
@@ -30,6 +43,10 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // For backward compat with Header/ProfilePanel
   const setDisplayName = (name: string) => {
     setPatientNameState(name);
+  };
+
+  const setPatientPhone = (phone: string) => {
+    setPatientPhoneState(phone);
   };
 
   return (
