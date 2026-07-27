@@ -2,9 +2,23 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
+const twilio = require('twilio');
 
 // Load environment variables
 dotenv.config({ path: path.join(__dirname, '.env') });
+
+const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
+const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+const twilioWhatsAppNumber = process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+14155238886';
+
+let twilioClient = null;
+if (twilioAccountSid && twilioAuthToken) {
+  twilioClient = twilio(twilioAccountSid, twilioAuthToken);
+  console.log('Twilio client initialized for SMS/WhatsApp fallback.');
+} else {
+  console.warn('Twilio credentials missing. Real SMS/WhatsApp will run in demo/simulation mode.');
+}
 
 const app = express();
 app.use(cors());
@@ -242,35 +256,73 @@ app.post('/api/ivr/finish', (req, res) => {
 // Active chat sessions map
 const activeChatSessions = new Map();
 
+// Helper to format/options text
+const getQuestionTextWithOptions = (index) => {
+  const q = questions[index];
+  if (!q) return '';
+  const optionsMap = {
+    'medication': 'Reply 1 for Yes, 2 for No.',
+    'pain_level': 'Reply with a number between 1 and 10.',
+    'exercise': 'Reply 1 for Yes, 2 for No.',
+    'swelling': 'Reply 1 for Mild, 2 for Moderate, 3 for Severe.',
+    'callback': 'Reply 1 for Yes, 2 for No.'
+  };
+  return `${q.text}\n(${optionsMap[q.key] || ''})`;
+};
+
 // Initialize Chat (SMS/WhatsApp) Session
-app.post('/api/chat/start', (req, res) => {
+app.post('/api/chat/start', async (req, res) => {
   const { patient_id, phone_number, mode } = req.body;
   const sessionId = 'CHAT-' + Date.now().toString().slice(-6);
+  const targetPhone = (phone_number || '+91 9528347830').replace(/\s+/g, '');
   
+  const qText = getQuestionTextWithOptions(0);
+  const initialText = `Hello! This is Sahayak Care Assistant. Let's do your daily recovery check-in.\n\n${qText}`;
+
   const newSession = {
     sessionId,
     patient_id: patient_id || 'PAT-101',
-    phone_number: phone_number || '+91 9528347830',
-    mode: mode || 'SMS', // 'SMS' or 'WhatsApp'
+    phone_number: targetPhone,
+    mode: mode || 'WhatsApp', // 'SMS' or 'WhatsApp'
     currentStep: 1,
     answers: {},
     messages: [
       {
         id: 'msg-init-1',
         sender: 'bot',
-        text: `Hello! This is Sahayak Care Assistant. Let's do your daily recovery check-in.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      },
-      {
-        id: 'msg-init-2',
-        sender: 'bot',
-        text: questions[0].text + '\n' + ivrQuestions[0].options,
+        text: initialText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
     ]
   };
 
   activeChatSessions.set(sessionId, newSession);
+
+  // Send real message if Twilio client is configured
+  if (twilioClient) {
+    try {
+      console.log(`Sending real ${mode} to ${targetPhone} using Twilio...`);
+      if (mode === 'WhatsApp') {
+        await twilioClient.messages.create({
+          body: initialText,
+          from: twilioWhatsAppNumber,
+          to: `whatsapp:${targetPhone}`
+        });
+      } else {
+        await twilioClient.messages.create({
+          body: initialText,
+          from: twilioPhoneNumber,
+          to: targetPhone
+        });
+      }
+      console.log(`Real ${mode} message sent to ${targetPhone}`);
+    } catch (error) {
+      console.error(`Failed to send real ${mode}:`, error.message);
+    }
+  } else {
+    console.log(`Simulated ${mode} start to ${targetPhone} (Twilio credentials missing)`);
+  }
+
   res.json({ success: true, session: newSession });
 });
 
@@ -302,30 +354,126 @@ app.post('/api/chat/message', (req, res) => {
   }
 
   // Determine response after a short simulated typing delay
-  setTimeout(() => {
+  setTimeout(async () => {
     const botTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const botMsgId = 'msg-bot-' + Date.now();
+    let replyText = '';
 
     if (session.currentStep <= questions.length) {
-      const nextQ = questions[session.currentStep - 1];
-      const optionsText = ivrQuestions[session.currentStep - 1].options;
-      session.messages.push({
-        id: botMsgId,
-        sender: 'bot',
-        text: `${nextQ.text}\n${optionsText}`,
-        timestamp: botTimestamp
-      });
+      replyText = getQuestionTextWithOptions(session.currentStep - 1);
     } else {
-      session.messages.push({
-        id: botMsgId,
-        sender: 'bot',
-        text: 'Thank you! All your recovery responses have been successfully synced to your doctor\'s dashboard. Goodbye!',
-        timestamp: botTimestamp
-      });
+      replyText = 'Thank you! All your recovery responses have been successfully synced to your doctor\'s dashboard. Goodbye!';
       console.log(`Chat session ${sessionId} completed:`, session.answers);
     }
+
+    session.messages.push({
+      id: botMsgId,
+      sender: 'bot',
+      text: replyText,
+      timestamp: botTimestamp
+    });
+
+    // Send real reply if Twilio is configured
+    if (twilioClient) {
+      try {
+        if (session.mode === 'WhatsApp') {
+          await twilioClient.messages.create({
+            body: replyText,
+            from: twilioWhatsAppNumber,
+            to: `whatsapp:${session.phone_number}`
+          });
+        } else {
+          await twilioClient.messages.create({
+            body: replyText,
+            from: twilioPhoneNumber,
+            to: session.phone_number
+          });
+        }
+      } catch (err) {
+        console.error(`Failed to send real response via Twilio:`, err.message);
+      }
+    }
+
     res.json({ success: true, session });
   }, 1000);
+});
+
+// Twilio SMS & WhatsApp Webhook (For receiving real replies from patient's phone)
+app.post('/api/twilio/sms-webhook', async (req, res) => {
+  const incomingText = req.body.Body ? req.body.Body.trim() : '';
+  const fromNumber = req.body.From ? req.body.From : ''; // e.g., +919528347830 or whatsapp:+919528347830
+  
+  console.log(`Twilio Webhook: Received "${incomingText}" from ${fromNumber}`);
+
+  // Find active chat session for this phone number
+  let session = null;
+  let activeSessionId = null;
+  
+  const normalizedFromPhone = fromNumber.replace('whatsapp:', '').replace(/\s+/g, '');
+  
+  for (const [sid, sess] of activeChatSessions.entries()) {
+    const normalizedSessPhone = sess.phone_number.replace(/\s+/g, '');
+    if (normalizedSessPhone === normalizedFromPhone || normalizedSessPhone.includes(normalizedFromPhone) || normalizedFromPhone.includes(normalizedSessPhone)) {
+      session = sess;
+      activeSessionId = sid;
+      break;
+    }
+  }
+
+  const twiml = new twilio.twiml.MessagingResponse();
+
+  if (!session) {
+    // If no active session, initialize one automatically
+    console.log(`No active chat session found for ${fromNumber}. Autocreating.`);
+    activeSessionId = 'CHAT-' + Date.now().toString().slice(-6);
+    session = {
+      sessionId: activeSessionId,
+      patient_id: 'PAT-101',
+      phone_number: normalizedFromPhone,
+      mode: fromNumber.startsWith('whatsapp:') ? 'WhatsApp' : 'SMS',
+      currentStep: 1,
+      answers: {},
+      messages: []
+    };
+    activeChatSessions.set(activeSessionId, session);
+  }
+
+  const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  // Save the user's incoming message
+  session.messages.push({
+    id: 'msg-user-' + Date.now(),
+    sender: 'user',
+    text: incomingText,
+    timestamp
+  });
+
+  const currentQIndex = session.currentStep - 1;
+  if (currentQIndex < questions.length) {
+    const currentQ = questions[currentQIndex];
+    session.answers[currentQ.key] = incomingText;
+    session.currentStep += 1;
+  }
+
+  let replyText = '';
+  if (session.currentStep <= questions.length) {
+    replyText = getQuestionTextWithOptions(session.currentStep - 1);
+  } else {
+    replyText = `Thank you! All your recovery responses have been successfully synced to your doctor's dashboard. Goodbye!`;
+    console.log(`Real Chat Session Completed via Webhook:`, session.answers);
+  }
+
+  // Save the bot's reply message
+  session.messages.push({
+    id: 'msg-bot-' + Date.now(),
+    sender: 'bot',
+    text: replyText,
+    timestamp
+  });
+
+  twiml.message(replyText);
+  res.type('text/xml');
+  res.send(twiml.toString());
 });
 
 app.listen(PORT, () => {
