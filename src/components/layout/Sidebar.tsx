@@ -15,7 +15,8 @@ import {
   ShieldCheck,
   ClipboardCheck,
   GitCommitHorizontal,
-  HeartHandshake
+  HeartHandshake,
+  PhoneCall
 } from 'lucide-react';
 import { useAuthMock } from '../../hooks/useAuthMock';
 import { useProfile } from '../../context/ProfileContext';
@@ -42,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const doctorNavItems: NavItem[] = [
     { name: 'Dashboard', path: '/doctor/dashboard', icon: LayoutDashboard },
     { name: 'Patients', path: '/doctor/patients', icon: Users },
+    { name: 'Offline Recovery Center', path: '/doctor/offline-recovery', icon: PhoneCall, badge: 'IVR' },
     { name: 'Digital Twin', path: '/doctor/digital-twin', icon: Activity },
     { name: 'Recovery Reports', path: '/doctor/reports', icon: FileBarChart },
     { name: 'Notifications', path: '/doctor/notifications', icon: Bell, badge: '5' },

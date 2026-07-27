@@ -24,6 +24,7 @@ import {
   GuardianDashboard,
   AdminDashboard,
   DigitalTwinPage,
+  OfflineRecoveryPage,
 } from '../pages/dashboards';
 
 export const AppRouter: React.FC = () => {
@@ -46,12 +47,16 @@ export const AppRouter: React.FC = () => {
           {/* Doctor Dashboard Routes */}
           <Route path="/doctor/dashboard" element={<DoctorDashboard />} />
           <Route path="/doctor/patients" element={<DoctorDashboard />} />
+          <Route path="/doctor/offline-recovery" element={<OfflineRecoveryPage />} />
           <Route path="/doctor/patient/:id" element={<DoctorPatientDetailsPage />} />
           <Route path="/doctor/patient/:id/twin" element={<DigitalTwinPage />} />
           <Route path="/doctor/digital-twin" element={<DigitalTwinPage />} />
           <Route path="/doctor/reports" element={<PatientReportPage />} />
           <Route path="/doctor/appointments" element={<DoctorDashboard />} />
           <Route path="/doctor/notifications" element={<DoctorDashboard />} />
+
+          {/* Direct Offline Recovery Route */}
+          <Route path="/offline-recovery" element={<OfflineRecoveryPage />} />
 
           {/* Guardian Dashboard Routes */}
           <Route path="/guardian/dashboard" element={<GuardianDashboard />} />

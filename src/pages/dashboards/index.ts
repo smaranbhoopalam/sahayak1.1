@@ -7,3 +7,4 @@ export { DoctorPatientDetailsPage } from './DoctorPatientDetailsPage';
 export { GuardianDashboard } from './GuardianDashboard';
 export { AdminDashboard } from './AdminDashboard';
 export { DigitalTwinPage } from './DigitalTwinPage';
+export { OfflineRecoveryPage } from './OfflineRecoveryPage';
