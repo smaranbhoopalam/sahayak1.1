@@ -71,8 +71,8 @@ app.post('/api/ivr/start-call', async (req, res) => {
       
       const params = new URLSearchParams();
       params.append('From', targetPhone);
-      params.append('To', virtualNumber);
       params.append('CallerId', virtualNumber);
+      params.append('CallType', 'trans');
       params.append('CustomField', sessionId);
       params.append('StatusCallback', `${baseUrl}/api/ivr/status-callback`);
       // Exotel calls the flow URL, which contains our Passthru applet pointing to the webhook
@@ -237,6 +237,95 @@ app.post('/api/ivr/finish', (req, res) => {
   };
 
   res.json({ success: true, ...recoveryMetrics });
+});
+
+// Active chat sessions map
+const activeChatSessions = new Map();
+
+// Initialize Chat (SMS/WhatsApp) Session
+app.post('/api/chat/start', (req, res) => {
+  const { patient_id, phone_number, mode } = req.body;
+  const sessionId = 'CHAT-' + Date.now().toString().slice(-6);
+  
+  const newSession = {
+    sessionId,
+    patient_id: patient_id || 'PAT-101',
+    phone_number: phone_number || '+91 9528347830',
+    mode: mode || 'SMS', // 'SMS' or 'WhatsApp'
+    currentStep: 1,
+    answers: {},
+    messages: [
+      {
+        id: 'msg-init-1',
+        sender: 'bot',
+        text: `Hello! This is Sahayak Care Assistant. Let's do your daily recovery check-in.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      },
+      {
+        id: 'msg-init-2',
+        sender: 'bot',
+        text: questions[0].text + '\n' + ivrQuestions[0].options,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ]
+  };
+
+  activeChatSessions.set(sessionId, newSession);
+  res.json({ success: true, session: newSession });
+});
+
+// Reply to Chat (SMS/WhatsApp)
+app.post('/api/chat/message', (req, res) => {
+  const { sessionId, text } = req.body;
+  const session = activeChatSessions.get(sessionId);
+
+  if (!session) {
+    return res.status(404).json({ success: false, error: 'Session not found' });
+  }
+
+  const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  
+  // Save user's answer
+  const userMsgId = 'msg-user-' + Date.now();
+  session.messages.push({
+    id: userMsgId,
+    sender: 'user',
+    text,
+    timestamp
+  });
+
+  const currentQIndex = session.currentStep - 1;
+  if (currentQIndex < questions.length) {
+    const currentQ = questions[currentQIndex];
+    session.answers[currentQ.key] = text;
+    session.currentStep += 1;
+  }
+
+  // Determine response after a short simulated typing delay
+  setTimeout(() => {
+    const botTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const botMsgId = 'msg-bot-' + Date.now();
+
+    if (session.currentStep <= questions.length) {
+      const nextQ = questions[session.currentStep - 1];
+      const optionsText = ivrQuestions[session.currentStep - 1].options;
+      session.messages.push({
+        id: botMsgId,
+        sender: 'bot',
+        text: `${nextQ.text}\n${optionsText}`,
+        timestamp: botTimestamp
+      });
+    } else {
+      session.messages.push({
+        id: botMsgId,
+        sender: 'bot',
+        text: 'Thank you! All your recovery responses have been successfully synced to your doctor\'s dashboard. Goodbye!',
+        timestamp: botTimestamp
+      });
+      console.log(`Chat session ${sessionId} completed:`, session.answers);
+    }
+    res.json({ success: true, session });
+  }, 1000);
 });
 
 app.listen(PORT, () => {

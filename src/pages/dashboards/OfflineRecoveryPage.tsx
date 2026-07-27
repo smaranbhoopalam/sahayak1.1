@@ -141,6 +141,133 @@ export const OfflineRecoveryPage: React.FC = () => {
     return () => clearInterval(timer);
   }, [callState]);
 
+  // Chat simulator state
+  const [selectedChatPatient, setSelectedChatPatient] = useState<OfflinePatient | null>(null);
+  const [chatSession, setChatSession] = useState<any>(null);
+  const [chatMode, setChatMode] = useState<'SMS' | 'WhatsApp'>('WhatsApp');
+  const [chatInputText, setChatInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+
+  const handleStartChat = async (patient: OfflinePatient, mode: 'SMS' | 'WhatsApp') => {
+    setSelectedChatPatient(patient);
+    setChatMode(mode);
+    setChatInputText('');
+    setIsTyping(false);
+    
+    try {
+      const res = await fetch('http://localhost:8000/api/chat/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patient_id: patient.id,
+          phone_number: patient.phone,
+          mode
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setChatSession(data.session);
+      }
+    } catch (e) {
+      // Fallback local mock simulation
+      setChatSession({
+        sessionId: `MOCK-CHAT-${Date.now().toString().slice(-4)}`,
+        patient_id: patient.id,
+        phone_number: patient.phone,
+        mode,
+        currentStep: 1,
+        answers: {},
+        messages: [
+          {
+            id: 'msg-init-1',
+            sender: 'bot',
+            text: `Hello! This is Sahayak Care Assistant. Let's do your daily recovery check-in.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          },
+          {
+            id: 'msg-init-2',
+            sender: 'bot',
+            text: ivrQuestions[0].text + '\n' + ivrQuestions[0].options,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ]
+      });
+    }
+  };
+
+  const handleSendMessage = async (textToSend?: string) => {
+    const msgText = textToSend || chatInputText;
+    if (!msgText.trim() || !chatSession) return;
+
+    if (!textToSend) setChatInputText('');
+
+    // Optimistically add user message
+    const updatedMessages = [
+      ...chatSession.messages,
+      {
+        id: 'msg-user-' + Date.now(),
+        sender: 'user',
+        text: msgText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ];
+
+    setChatSession({
+      ...chatSession,
+      messages: updatedMessages
+    });
+
+    setIsTyping(true);
+
+    try {
+      const res = await fetch('http://localhost:8000/api/chat/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: chatSession.sessionId,
+          text: msgText
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setChatSession(data.session);
+      }
+    } catch (e) {
+      // Local fallback simulation logic
+      setTimeout(() => {
+        const nextStep = chatSession.currentStep + 1;
+        const botMessages = [...updatedMessages];
+        const answers = { ...chatSession.answers, [ivrQuestions[chatSession.currentStep - 1].key]: msgText };
+        
+        if (nextStep <= ivrQuestions.length) {
+          const nextQ = ivrQuestions[nextStep - 1];
+          botMessages.push({
+            id: 'msg-bot-' + Date.now(),
+            sender: 'bot',
+            text: `${nextQ.text}\n${nextQ.options}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          });
+        } else {
+          botMessages.push({
+            id: 'msg-bot-final',
+            sender: 'bot',
+            text: 'Thank you! All your recovery responses have been successfully synced to your doctor\'s dashboard. Goodbye!',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          });
+        }
+
+        setChatSession({
+          ...chatSession,
+          currentStep: nextStep,
+          messages: botMessages,
+          answers
+        });
+      }, 1000);
+    } finally {
+      setTimeout(() => setIsTyping(false), 1000);
+    }
+  };
+
   // Initiate Call function connecting to backend API
   const handleStartCall = async (patient: OfflinePatient) => {
     setActiveCallPatient(patient);
@@ -480,14 +607,168 @@ export const OfflineRecoveryPage: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 3: SMS */}
+      {/* TAB 3: SMS/WhatsApp Messaging */}
       {activeTab === 'sms' && (
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
-          <h3 className="text-base font-black text-slate-900">SMS Tele-triage Module</h3>
-          <p className="text-xs text-slate-500">Automated SMS check-in prompts & responses for feature phone users.</p>
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-2">
-            <p className="font-extrabold text-emerald-800">✉️ SMS Outbound Broadcast Engine Active</p>
-            <p>124 SMS check-in messages delivered today via Twilio Messaging Service.</p>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Patient Selection Roster */}
+          <div className="lg:col-span-5 bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs space-y-4">
+            <div>
+              <h3 className="text-base font-black text-slate-900">Message Triage Hub</h3>
+              <p className="text-xs text-slate-500 font-semibold">Initiate automated patient check-ins via SMS or WhatsApp</p>
+            </div>
+            
+            <div className="space-y-3">
+              {patientsList.map((patient) => (
+                <div
+                  key={patient.id}
+                  className={`p-4 rounded-xl border transition-all flex flex-col gap-3 ${
+                    selectedChatPatient?.id === patient.id
+                      ? 'border-emerald-500 bg-emerald-50/20'
+                      : 'border-slate-200/80 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-slate-900 text-white font-black text-xs flex items-center justify-center">
+                        {patient.name.charAt(0)}
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-slate-900">{patient.name}</h4>
+                        <p className="text-[10px] font-semibold text-slate-500">{patient.phone}</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-400">Day {patient.recoveryDay}</span>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleStartChat(patient, 'SMS')}
+                      className="flex-1 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-800 text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <MessageSquare className="w-3 h-3" /> SMS
+                    </button>
+                    <button
+                      onClick={() => handleStartChat(patient, 'WhatsApp')}
+                      className="flex-1 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-[11px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <span className="text-xs">💬</span> WhatsApp
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Interactive Phone Mockup */}
+          <div className="lg:col-span-7 flex flex-col items-center justify-center">
+            {chatSession ? (
+              <div className="w-full max-w-sm rounded-[3rem] border-8 border-slate-900 bg-slate-950 overflow-hidden shadow-2xl relative aspect-[9/18] flex flex-col min-h-[500px]">
+                {/* Phone Speaker & Camera Notch */}
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 w-32 h-6 bg-slate-900 rounded-full z-10 flex items-center justify-center">
+                  <div className="w-12 h-1 bg-slate-800 rounded-full mr-2"></div>
+                  <div className="w-2.5 h-2.5 bg-slate-800 rounded-full"></div>
+                </div>
+
+                {/* Chat App Header */}
+                <div className={`pt-9 pb-3 px-4 flex items-center justify-between text-white border-b ${
+                  chatMode === 'WhatsApp' ? 'bg-[#075e54] border-[#075e54]' : 'bg-slate-900 border-slate-800'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-xs font-black">
+                      {selectedChatPatient?.name.charAt(0)}
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black leading-none">{selectedChatPatient?.name}</h4>
+                      <span className="text-[9px] text-emerald-300 font-bold">Online</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 text-[10px] font-bold opacity-80">
+                    <span>{chatMode} Mode</span>
+                  </div>
+                </div>
+
+                {/* Message Body */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5] flex flex-col">
+                  {chatSession.messages.map((msg: any) => (
+                    <div
+                      key={msg.id}
+                      className={`max-w-[75%] p-2.5 rounded-2xl text-xs relative ${
+                        msg.sender === 'bot'
+                          ? 'bg-white text-slate-800 self-start rounded-tl-none shadow-xs'
+                          : 'bg-[#dcf8c6] text-slate-800 self-end rounded-tr-none shadow-xs'
+                      }`}
+                    >
+                      <p className="whitespace-pre-line leading-relaxed">{msg.text}</p>
+                      <span className="block text-[8px] text-slate-400 text-right mt-1">{msg.timestamp}</span>
+                    </div>
+                  ))}
+                  
+                  {isTyping && (
+                    <div className="bg-white text-slate-800 self-start p-2.5 rounded-2xl rounded-tl-none shadow-xs text-xs flex items-center gap-1 max-w-[50%]">
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-100"></span>
+                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-200"></span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Preset Suggestions Quick Replies */}
+                {chatSession.currentStep <= ivrQuestions.length && !isTyping && (
+                  <div className="bg-slate-100 px-3 py-2 border-t border-slate-200 flex flex-wrap gap-1.5 justify-center">
+                    {ivrQuestions[chatSession.currentStep - 1].key === 'pain_level' ? (
+                      [1, 3, 5, 8].map((num) => (
+                        <button
+                          key={num}
+                          onClick={() => handleSendMessage(num.toString())}
+                          className="px-2.5 py-1 rounded-full bg-white hover:bg-emerald-500 hover:text-white border border-slate-300 text-[10px] font-black text-slate-700 transition-all cursor-pointer"
+                        >
+                          Pain: {num}
+                        </button>
+                      ))
+                    ) : (
+                      [
+                        { label: 'Yes (1)', value: '1' },
+                        { label: 'No (2)', value: '2' }
+                      ].map((btn) => (
+                        <button
+                          key={btn.value}
+                          onClick={() => handleSendMessage(btn.value)}
+                          className="px-3 py-1 rounded-full bg-white hover:bg-emerald-500 hover:text-white border border-slate-300 text-[10px] font-black text-slate-700 transition-all cursor-pointer"
+                        >
+                          {btn.label}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Chat App Input */}
+                <div className="p-3 bg-slate-900 border-t border-slate-850 flex gap-2 items-center">
+                  <input
+                    type="text"
+                    placeholder="Type a message..."
+                    value={chatInputText}
+                    onChange={(e) => setChatInputText(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                    className="flex-1 bg-slate-800 border border-slate-750 text-white rounded-full px-4 py-2 text-xs font-semibold focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    onClick={() => handleSendMessage()}
+                    className="w-8 h-8 rounded-full bg-emerald-500 text-white flex items-center justify-center hover:bg-emerald-600 transition-all cursor-pointer"
+                  >
+                    🚀
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center p-8 border-2 border-dashed border-slate-200 rounded-2xl max-w-sm bg-slate-50/50">
+                <span className="text-4xl block mb-2">📲</span>
+                <h4 className="text-sm font-black text-slate-800">Phone Simulator Idle</h4>
+                <p className="text-[11px] font-semibold text-slate-500 mt-1">
+                  Select a patient and choose a delivery mode (SMS or WhatsApp) on the left to start the interactive triage.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
