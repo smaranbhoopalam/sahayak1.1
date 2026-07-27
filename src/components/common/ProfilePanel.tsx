@@ -110,7 +110,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ isOpen, onClose }) =
   const [activeTab, setActiveTab] = useState<'personal' | 'medical' | 'review'>('personal');
   const [showSuccess, setShowSuccess] = useState(false);
 
-  const { setDisplayName } = useProfile();
+  const { setDisplayName, setPatientPhone } = useProfile();
 
   const handleEdit = () => {
     setDraft({ ...profile });
@@ -120,6 +120,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ isOpen, onClose }) =
   const handleSave = () => {
     setProfile({ ...draft });
     setDisplayName(draft.name); // sync Header avatar letter
+    setPatientPhone(draft.phone); // sync phone number globally for IVR call check-in
     setEditMode(false);
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 3200);

@@ -83,6 +83,8 @@ const mockOfflinePatients: OfflinePatient[] = [
   },
 ];
 
+import { useProfile } from '../../context/ProfileContext';
+
 const ivrQuestions = [
   { step: 1, key: 'medication', text: "Question 1. Have you taken today's medicine?", options: "Press 1 for Yes | Press 2 for No" },
   { step: 2, key: 'pain_level', text: "Question 2. Rate your current pain level.", options: "Press a number between 1 and 10 on your keypad" },
@@ -93,6 +95,24 @@ const ivrQuestions = [
 
 export const OfflineRecoveryPage: React.FC = () => {
   const navigate = useNavigate();
+  const { patientName, patientPhone } = useProfile();
+
+  // Dynamically map the patient roster to use context data
+  const patientsList: OfflinePatient[] = [
+    {
+      id: 'PAT-101',
+      name: patientName,
+      phone: patientPhone,
+      procedure: 'Post-ACL Reconstruction',
+      recoveryDay: 12,
+      language: 'English',
+      commMode: 'Both',
+      hospital: 'AIIMS New Delhi',
+      lastCallStatus: 'Completed',
+      confidenceScore: 92,
+    },
+    ...mockOfflinePatients.slice(1) // Keep the rest of the mock roster
+  ];
 
   // Active Tab: dashboard | patients | ivr | sms | history | reports | settings
   const [activeTab, setActiveTab] = useState<'dashboard' | 'patients' | 'ivr' | 'sms' | 'history' | 'reports' | 'settings'>('dashboard');
@@ -228,7 +248,7 @@ export const OfflineRecoveryPage: React.FC = () => {
   };
 
   // Filtered Patients List
-  const filteredPatients = mockOfflinePatients.filter((p) => {
+  const filteredPatients = patientsList.filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.phone.includes(searchTerm);
     const matchesComm = filterMode === 'All' || p.commMode === filterMode;
     return matchesSearch && matchesComm;
@@ -257,7 +277,7 @@ export const OfflineRecoveryPage: React.FC = () => {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() => handleStartCall(mockOfflinePatients[0])}
+            onClick={() => handleStartCall(patientsList[0])}
             className="px-5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs transition-all shadow-lg shadow-emerald-500/25 flex items-center gap-2 shrink-0 cursor-pointer"
           >
             <Phone className="w-4 h-4" /> Start Express IVR Call
@@ -335,7 +355,7 @@ export const OfflineRecoveryPage: React.FC = () => {
             </div>
 
             <div className="space-y-3">
-              {mockOfflinePatients.map((patient) => (
+              {patientsList.map((patient) => (
                 <div
                   key={patient.id}
                   className="p-4 rounded-xl border border-slate-200/80 hover:border-slate-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
@@ -483,7 +503,7 @@ export const OfflineRecoveryPage: React.FC = () => {
           </div>
 
           <div className="space-y-4">
-            {mockOfflinePatients.map((p) => (
+            {patientsList.map((p) => (
               <div key={p.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
                 <div className="flex justify-between items-center text-xs">
                   <div>
