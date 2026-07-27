@@ -148,10 +148,10 @@ export const OfflineRecoveryPage: React.FC = () => {
     setCallDuration(0);
     setCurrentStep(1);
     setUserAnswers({});
-    setCallLogs([`[00:00] Initiating Twilio IVR outbound voice call to ${patient.phone}...`]);
+    setCallLogs([`[00:00] Initiating Exotel IVR outbound voice call to ${patient.phone}...`]);
 
     try {
-      // Call FastAPI Backend Endpoint
+      // Call Exotel Backend Endpoint
       const res = await fetch('http://localhost:8000/api/ivr/start-call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,14 +166,14 @@ export const OfflineRecoveryPage: React.FC = () => {
 
       setTimeout(() => {
         setCallState('dialing');
-        setCallLogs((prev) => [...prev, `[00:02] Dialing ${patient.phone} via Twilio Voice Gateway (SID: ${data.call_sid || 'CA99420'})`]);
+        setCallLogs((prev) => [...prev, `[00:02] Dialing ${patient.phone} via Exotel Gateway (SID: ${data.call_sid || 'EX99420'})`]);
       }, 1200);
 
       setTimeout(() => {
         setCallState('connected');
         setCallLogs((prev) => [
           ...prev,
-          `[00:04] Call Connected. Playing TwiML Greeting in ${patient.language}...`,
+          `[00:04] Call Connected. Executing Exotel XML Flow...`,
           `[00:05] Prompting Q1: "${ivrQuestions[0].text}"`,
         ]);
       }, 2800);
@@ -185,7 +185,7 @@ export const OfflineRecoveryPage: React.FC = () => {
         setCallState('connected');
         setCallLogs([
           `[00:00] Initiating IVR call to ${patient.phone}...`,
-          `[00:02] Connecting Twilio Voice Gateway...`,
+          `[00:02] Connecting Exotel Voice Gateway...`,
           `[00:04] Call Connected. Prompting Q1: "${ivrQuestions[0].text}"`,
         ]);
       }, 2500);
@@ -264,7 +264,7 @@ export const OfflineRecoveryPage: React.FC = () => {
               <PhoneCall className="w-3.5 h-3.5" /> Offline Recovery Center
             </span>
             <span className="px-3.5 py-1 rounded-full text-xs font-black bg-white/10 text-white border border-white/15">
-              Real Twilio Voice & IVR Gateway
+              Real Exotel Voice & IVR Gateway
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
@@ -585,7 +585,7 @@ export const OfflineRecoveryPage: React.FC = () => {
                     <span className={`relative inline-flex rounded-full h-3 w-3 ${callState === 'completed' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
                   </span>
                   <span className="text-xs font-black tracking-wider uppercase text-emerald-400">
-                    {callState === 'calling' && 'Initiating Twilio Outbound Call...'}
+                    {callState === 'calling' && 'Initiating Exotel Outbound Call...'}
                     {callState === 'dialing' && 'Ringing Patient Phone...'}
                     {callState === 'connected' && `Call Connected • 00:${callDuration < 10 ? '0' + callDuration : callDuration}`}
                     {callState === 'completed' && 'Call Completed • Responses Synced'}
@@ -594,7 +594,7 @@ export const OfflineRecoveryPage: React.FC = () => {
 
                 {callState === 'connected' && (
                   <div className="text-xs text-slate-300 font-semibold pt-1">
-                    Language: <span className="text-emerald-400 font-bold">{activeCallPatient.language}</span> • Provider: <span className="text-brand-400 font-bold">Twilio Voice API</span>
+                    Language: <span className="text-emerald-400 font-bold">{activeCallPatient.language}</span> • Provider: <span className="text-brand-400 font-bold">Exotel Voice API</span>
                   </div>
                 )}
               </div>
@@ -660,7 +660,7 @@ export const OfflineRecoveryPage: React.FC = () => {
 
               {/* Live Telemetry Call Logs */}
               <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono space-y-1 max-h-32 overflow-y-auto">
-                <span className="text-[9px] text-slate-500 font-bold uppercase block font-sans">Live Twilio Call Log</span>
+                <span className="text-[9px] text-slate-500 font-bold uppercase block font-sans">Live Exotel Call Log</span>
                 {callLogs.map((log, i) => (
                   <p key={i} className="text-slate-300">{log}</p>
                 ))}

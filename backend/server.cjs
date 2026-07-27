@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const twilio = require('twilio');
 const path = require('path');
 
 // Load environment variables
@@ -13,32 +12,32 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const PORT = 8000;
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const twilioPhone = process.env.TWILIO_PHONE_NUMBER;
+const accountSid = process.env.EXOTEL_ACCOUNT_SID;
+const apiKey = process.env.EXOTEL_API_KEY;
+const apiToken = process.env.EXOTEL_API_TOKEN;
+const virtualNumber = process.env.EXOTEL_VIRTUAL_NUMBER;
+const subdomain = process.env.EXOTEL_SUBDOMAIN || 'api.exotel.com';
 const baseUrl = process.env.BASE_URL || 'http://localhost:8000';
 
-let client;
-if (accountSid && authToken) {
-  client = twilio(accountSid, authToken);
-  console.log('Twilio client initialized successfully.');
-} else {
-  console.warn('Twilio credentials missing. Running in demo mode.');
-}
+console.log('Exotel Client Configured:', {
+  accountSid,
+  subdomain,
+  virtualNumber
+});
 
 // In-memory store for active check-in sessions
 const activeSessions = new Map();
 
 // Questions config
 const questions = [
-  { step: 1, key: 'medication', text: "Question 1. Have you taken today's medicine? Press 1 for Yes. Press 2 for No." },
-  { step: 2, key: 'pain_level', text: "Question 2. Rate your current pain level. Press a number between 1 and 10 on your keypad." },
-  { step: 3, key: 'exercise', text: "Question 3. Did you complete today's exercises? Press 1 for Yes. Press 2 for No." },
-  { step: 4, key: 'swelling', text: "Question 4. Do you have swelling at the operated site? Press 1 for Mild, Press 2 for Moderate, Press 3 for Severe." },
-  { step: 5, key: 'callback', text: "Question 5. Would you like a doctor callback today? Press 1 for Yes. Press 2 for No." }
+  { step: 1, key: 'medication', text: "Have you taken today's medicine? Press 1 for Yes, 2 for No." },
+  { step: 2, key: 'pain_level', text: "Rate your current pain level. Press a number between 1 and 10 on your keypad." },
+  { step: 3, key: 'exercise', text: "Did you complete today's exercises? Press 1 for Yes, 2 for No." },
+  { step: 4, key: 'swelling', text: "Do you have swelling at the operated site? Press 1 for Mild, 2 for Moderate, 3 for Severe." },
+  { step: 5, key: 'callback', text: "Would you like a doctor callback today? Press 1 for Yes, 2 for No." }
 ];
 
-// Start Outbound Call
+// Start Outbound Call via Exotel API
 app.post('/api/ivr/start-call', async (req, res) => {
   const { patient_id, phone_number } = req.body;
   const targetPhone = phone_number || '+919528347830';
@@ -53,57 +52,80 @@ app.post('/api/ivr/start-call', async (req, res) => {
 
   const callbackUrl = `${baseUrl}/api/ivr/webhook?sessionId=${sessionId}`;
 
-  console.log(`Placing call to ${targetPhone} from Twilio number ${twilioPhone}...`);
+  console.log(`Placing Exotel call to ${targetPhone} from virtual number ${virtualNumber}...`);
 
-  if (client) {
+  if (apiKey && apiToken && accountSid) {
     try {
-      const call = await client.calls.create({
-        to: targetPhone,
-        from: twilioPhone,
-        url: callbackUrl,
-        method: 'POST'
+      // Exotel Outbound Connect API Endpoint
+      const exotelUrl = `https://${apiKey}:${apiToken}@${subdomain}/v1/Accounts/${accountSid}/Calls/connect.json`;
+      
+      const params = new URLSearchParams();
+      params.append('From', targetPhone);
+      params.append('To', virtualNumber);
+      params.append('CallerId', virtualNumber);
+      params.append('CustomField', sessionId);
+      params.append('StatusCallback', `${baseUrl}/api/ivr/status-callback`);
+      // Exotel calls the webhook Url to get dynamic IVR XML
+      params.append('Url', callbackUrl);
+
+      const response = await fetch(exotelUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params
       });
 
-      console.log(`Call successfully placed (SID: ${call.sid})`);
-      res.json({
-        success: true,
-        session_id: sessionId,
-        call_sid: call.sid,
-        patient_id,
-        phone_number: targetPhone,
-        status: 'initiated',
-        provider: 'Twilio'
-      });
+      const data = await response.json();
+      
+      if (response.ok && data.Call) {
+        console.log(`Exotel Call successfully placed (SID: ${data.Call.Sid})`);
+        res.json({
+          success: true,
+          session_id: sessionId,
+          call_sid: data.Call.Sid,
+          patient_id,
+          phone_number: targetPhone,
+          status: 'initiated',
+          provider: 'Exotel'
+        });
+      } else {
+        console.error('Exotel API Error response:', data);
+        throw new Error(data.RestException?.Message || 'Failed to place call');
+      }
     } catch (err) {
-      console.error('Twilio Outbound Call Error:', err.message);
+      console.error('Exotel Outbound Call Error:', err.message);
       res.status(500).json({ success: false, error: err.message });
     }
   } else {
+    // Fallback Mock mode
     res.json({
       success: true,
       session_id: sessionId,
-      call_sid: 'SIM-CALL',
+      call_sid: 'SIM-EXOTEL-CALL',
       patient_id,
       phone_number: targetPhone,
       status: 'simulated',
-      provider: 'Demo Engine'
+      provider: 'Exotel Demo Engine'
     });
   }
 });
 
-// Twilio Webhook (Answers call and plays prompts)
+// Exotel Webhook (Plays prompts and gathers responses using Exotel XML format)
 app.post('/api/ivr/webhook', (req, res) => {
   const sessionId = req.query.sessionId;
+  // Exotel returns digits pressed in the "Digits" parameter during Gather
   const digits = req.body.Digits;
 
   const session = activeSessions.get(sessionId);
-  const response = new twilio.twiml.VoiceResponse();
+
+  res.type('text/xml');
 
   if (!session) {
-    response.say("Welcome to Sahayak Healthcare. Session not found.");
-    response.hangup();
-    res.type('text/xml');
-    return res.send(response.toString());
+    return res.send(
+      `<Response>
+        <Say voice="female">Welcome to Sahayak Healthcare. Session not found.</Say>
+        <Hangup/>
+      </Response>`
+    );
   }
 
   // If digits are returned from a previous step, save it
@@ -117,26 +139,36 @@ app.post('/api/ivr/webhook', (req, res) => {
   // Play next question or end call
   if (session.currentStep <= questions.length) {
     const nextQ = questions[session.currentStep - 1];
-    const gather = response.gather({
-      numDigits: nextQ.key === 'pain_level' ? 2 : 1, // pain is 1-10 (up to 2 digits)
-      action: `${baseUrl}/api/ivr/webhook?sessionId=${sessionId}`,
-      method: 'POST',
-      timeout: 10
-    });
-    gather.say(nextQ.text, { voice: 'Polly.Aditi', language: 'en-IN' });
+    const gatherUrl = `${baseUrl}/api/ivr/webhook?sessionId=${sessionId}`;
     
-    // If patient didn't press anything, repeat
-    response.say("We did not receive any key input. Let us repeat the question.", { voice: 'Polly.Aditi', language: 'en-IN' });
-    response.redirect(`${baseUrl}/api/ivr/webhook?sessionId=${sessionId}`);
+    // Generate Exotel XML response
+    const xmlResponse = `
+      <Response>
+        <Gather action="${gatherUrl}" method="POST" numDigits="${nextQ.key === 'pain_level' ? 2 : 1}" timeout="10">
+          <Say voice="female">${nextQ.text}</Say>
+        </Gather>
+        <Say voice="female">We did not receive any key input. Let us repeat.</Say>
+        <Redirect method="POST">${gatherUrl}</Redirect>
+      </Response>
+    `;
+    res.send(xmlResponse.trim());
   } else {
     // Finish session
-    response.say("Thank you. All your recovery responses have been successfully synced to your doctor's dashboard. Goodbye.", { voice: 'Polly.Aditi', language: 'en-IN' });
-    response.hangup();
+    const finalXml = `
+      <Response>
+        <Say voice="female">Thank you. All your recovery responses have been successfully synced to your doctor's dashboard. Goodbye.</Say>
+        <Hangup/>
+      </Response>
+    `;
     console.log(`Session ${sessionId} fully completed:`, session.answers);
+    res.send(finalXml.trim());
   }
+});
 
-  res.type('text/xml');
-  res.send(response.toString());
+// Exotel status callback webhook
+app.post('/api/ivr/status-callback', (req, res) => {
+  console.log('Exotel Status Callback:', req.body);
+  res.send('OK');
 });
 
 // Simulated step answer (for dashboard logs/keypad clicks)
@@ -178,5 +210,5 @@ app.post('/api/ivr/finish', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Sahayak Node Telephony Server running on port ${PORT}`);
+  console.log(`Sahayak Node Exotel Telephony Server running on port ${PORT}`);
 });
