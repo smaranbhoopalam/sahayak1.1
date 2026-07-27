@@ -75,8 +75,9 @@ app.post('/api/ivr/start-call', async (req, res) => {
       params.append('CallerId', virtualNumber);
       params.append('CustomField', sessionId);
       params.append('StatusCallback', `${baseUrl}/api/ivr/status-callback`);
-      // Exotel calls the webhook Url to get dynamic IVR XML
-      params.append('Url', callbackUrl);
+      // Exotel calls the flow URL, which contains our Passthru applet pointing to the webhook
+      const flowUrl = `http://my.exotel.com/${accountSid}/exoml/start_voice/${process.env.EXOTEL_APP_ID}`;
+      params.append('Url', flowUrl);
 
       const response = await fetch(exotelUrl, {
         method: 'POST',
