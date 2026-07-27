@@ -270,6 +270,40 @@ const getQuestionTextWithOptions = (index) => {
   return `${q.text}\n(${optionsMap[q.key] || ''})`;
 };
 
+// Send Exotel SMS Helper
+const sendExotelSMS = async (toPhone, bodyText) => {
+  if (!apiKey || !apiToken || !accountSid) {
+    console.warn('Exotel credentials missing for SMS.');
+    return false;
+  }
+  try {
+    const exotelSmsUrl = `https://${subdomain}/v1/Accounts/${accountSid}/Sms/send.json`;
+    const authHeader = 'Basic ' + Buffer.from(apiKey + ':' + apiToken).toString('base64');
+    
+    const params = new URLSearchParams();
+    params.append('From', virtualNumber);
+    params.append('To', toPhone);
+    params.append('Body', bodyText);
+    
+    console.log(`Sending real Exotel SMS to ${toPhone} with body: "${bodyText}"...`);
+    const res = await fetch(exotelSmsUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: params
+    });
+    
+    const data = await res.json();
+    console.log('Exotel SMS Send Response:', data);
+    return true;
+  } catch (err) {
+    console.error('Error sending Exotel SMS:', err.message);
+    return false;
+  }
+};
+
 // Initialize Chat (SMS/WhatsApp) Session
 app.post('/api/chat/start', async (req, res) => {
   const { patient_id, phone_number, mode } = req.body;
@@ -283,7 +317,7 @@ app.post('/api/chat/start', async (req, res) => {
     sessionId,
     patient_id: patient_id || 'PAT-101',
     phone_number: targetPhone,
-    mode: mode || 'WhatsApp', // 'SMS' or 'WhatsApp'
+    mode: mode || 'WhatsApp',
     currentStep: 1,
     answers: {},
     messages: [
@@ -298,29 +332,19 @@ app.post('/api/chat/start', async (req, res) => {
 
   activeChatSessions.set(sessionId, newSession);
 
-  // Send real message if Twilio client is configured
-  if (twilioClient) {
+  if (mode === 'SMS') {
+    await sendExotelSMS(targetPhone, initialText);
+  } else if (twilioClient) {
     try {
-      console.log(`Sending real ${mode} to ${targetPhone} using Twilio...`);
-      if (mode === 'WhatsApp') {
-        await twilioClient.messages.create({
-          body: initialText,
-          from: twilioWhatsAppNumber,
-          to: `whatsapp:${targetPhone}`
-        });
-      } else {
-        await twilioClient.messages.create({
-          body: initialText,
-          from: twilioPhoneNumber,
-          to: targetPhone
-        });
-      }
-      console.log(`Real ${mode} message sent to ${targetPhone}`);
+      console.log(`Sending real WhatsApp to ${targetPhone} using Twilio...`);
+      await twilioClient.messages.create({
+        body: initialText,
+        from: twilioWhatsAppNumber,
+        to: `whatsapp:${targetPhone}`
+      });
     } catch (error) {
-      console.error(`Failed to send real ${mode}:`, error.message);
+      console.error(`Failed to send real WhatsApp:`, error.message);
     }
-  } else {
-    console.log(`Simulated ${mode} start to ${targetPhone} (Twilio credentials missing)`);
   }
 
   res.json({ success: true, session: newSession });
@@ -373,24 +397,17 @@ app.post('/api/chat/message', (req, res) => {
       timestamp: botTimestamp
     });
 
-    // Send real reply if Twilio is configured
-    if (twilioClient) {
+    if (session.mode === 'SMS') {
+      await sendExotelSMS(session.phone_number, replyText);
+    } else if (twilioClient) {
       try {
-        if (session.mode === 'WhatsApp') {
-          await twilioClient.messages.create({
-            body: replyText,
-            from: twilioWhatsAppNumber,
-            to: `whatsapp:${session.phone_number}`
-          });
-        } else {
-          await twilioClient.messages.create({
-            body: replyText,
-            from: twilioPhoneNumber,
-            to: session.phone_number
-          });
-        }
+        await twilioClient.messages.create({
+          body: replyText,
+          from: twilioWhatsAppNumber,
+          to: `whatsapp:${session.phone_number}`
+        });
       } catch (err) {
-        console.error(`Failed to send real response via Twilio:`, err.message);
+        console.error(`Failed to send WhatsApp response:`, err.message);
       }
     }
 
@@ -398,18 +415,20 @@ app.post('/api/chat/message', (req, res) => {
   }, 1000);
 });
 
-// Twilio SMS & WhatsApp Webhook (For receiving real replies from patient's phone)
-app.post('/api/twilio/sms-webhook', async (req, res) => {
-  const incomingText = req.body.Body ? req.body.Body.trim() : '';
-  const fromNumber = req.body.From ? req.body.From : ''; // e.g., +919528347830 or whatsapp:+919528347830
+// Exotel SMS Webhook (For receiving real replies to Exotel SMS on user's phone)
+app.all('/api/exotel/sms-webhook', async (req, res) => {
+  const incomingText = (req.body.Body || req.query.Body || req.body.SmsBody || req.query.SmsBody || '').trim();
+  const fromNumber = (req.body.From || req.query.From || '');
   
-  console.log(`Twilio Webhook: Received "${incomingText}" from ${fromNumber}`);
+  console.log(`Exotel SMS Webhook: Received "${incomingText}" from ${fromNumber}`);
 
-  // Find active chat session for this phone number
+  if (!fromNumber) {
+    return res.send('No sender number');
+  }
+
   let session = null;
   let activeSessionId = null;
-  
-  const normalizedFromPhone = fromNumber.replace('whatsapp:', '').replace(/\s+/g, '');
+  const normalizedFromPhone = fromNumber.replace(/\s+/g, '');
   
   for (const [sid, sess] of activeChatSessions.entries()) {
     const normalizedSessPhone = sess.phone_number.replace(/\s+/g, '');
@@ -420,17 +439,14 @@ app.post('/api/twilio/sms-webhook', async (req, res) => {
     }
   }
 
-  const twiml = new twilio.twiml.MessagingResponse();
-
   if (!session) {
-    // If no active session, initialize one automatically
     console.log(`No active chat session found for ${fromNumber}. Autocreating.`);
     activeSessionId = 'CHAT-' + Date.now().toString().slice(-6);
     session = {
       sessionId: activeSessionId,
       patient_id: 'PAT-101',
       phone_number: normalizedFromPhone,
-      mode: fromNumber.startsWith('whatsapp:') ? 'WhatsApp' : 'SMS',
+      mode: 'SMS',
       currentStep: 1,
       answers: {},
       messages: []
@@ -440,7 +456,6 @@ app.post('/api/twilio/sms-webhook', async (req, res) => {
 
   const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  // Save the user's incoming message
   session.messages.push({
     id: 'msg-user-' + Date.now(),
     sender: 'user',
@@ -460,10 +475,78 @@ app.post('/api/twilio/sms-webhook', async (req, res) => {
     replyText = getQuestionTextWithOptions(session.currentStep - 1);
   } else {
     replyText = `Thank you! All your recovery responses have been successfully synced to your doctor's dashboard. Goodbye!`;
-    console.log(`Real Chat Session Completed via Webhook:`, session.answers);
   }
 
-  // Save the bot's reply message
+  session.messages.push({
+    id: 'msg-bot-' + Date.now(),
+    sender: 'bot',
+    text: replyText,
+    timestamp
+  });
+
+  await sendExotelSMS(session.phone_number, replyText);
+  res.send('OK');
+});
+
+// Twilio SMS Webhook
+app.post('/api/twilio/sms-webhook', async (req, res) => {
+  const incomingText = req.body.Body ? req.body.Body.trim() : '';
+  const fromNumber = req.body.From ? req.body.From : '';
+  
+  console.log(`Twilio Webhook: Received "${incomingText}" from ${fromNumber}`);
+
+  let session = null;
+  let activeSessionId = null;
+  const normalizedFromPhone = fromNumber.replace('whatsapp:', '').replace(/\s+/g, '');
+  
+  for (const [sid, sess] of activeChatSessions.entries()) {
+    const normalizedSessPhone = sess.phone_number.replace(/\s+/g, '');
+    if (normalizedSessPhone === normalizedFromPhone || normalizedSessPhone.includes(normalizedFromPhone) || normalizedFromPhone.includes(normalizedSessPhone)) {
+      session = sess;
+      activeSessionId = sid;
+      break;
+    }
+  }
+
+  const twiml = new twilio.twiml.MessagingResponse();
+
+  if (!session) {
+    activeSessionId = 'CHAT-' + Date.now().toString().slice(-6);
+    session = {
+      sessionId: activeSessionId,
+      patient_id: 'PAT-101',
+      phone_number: normalizedFromPhone,
+      mode: fromNumber.startsWith('whatsapp:') ? 'WhatsApp' : 'SMS',
+      currentStep: 1,
+      answers: {},
+      messages: []
+    };
+    activeChatSessions.set(activeSessionId, session);
+  }
+
+  const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  session.messages.push({
+    id: 'msg-user-' + Date.now(),
+    sender: 'user',
+    text: incomingText,
+    timestamp
+  });
+
+  const currentQIndex = session.currentStep - 1;
+  if (currentQIndex < questions.length) {
+    const currentQ = questions[currentQIndex];
+    session.answers[currentQ.key] = incomingText;
+    session.currentStep += 1;
+  }
+
+  let replyText = '';
+  if (session.currentStep <= questions.length) {
+    replyText = getQuestionTextWithOptions(session.currentStep - 1);
+  } else {
+    replyText = `Thank you! All your recovery responses have been successfully synced to your doctor's dashboard. Goodbye!`;
+  }
+
   session.messages.push({
     id: 'msg-bot-' + Date.now(),
     sender: 'bot',
