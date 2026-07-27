@@ -11,6 +11,14 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  if (req.body && Object.keys(req.body).length) console.log('Body:', req.body);
+  if (req.query && Object.keys(req.query).length) console.log('Query:', req.query);
+  next();
+});
+
 const PORT = 8000;
 const accountSid = process.env.EXOTEL_ACCOUNT_SID;
 const apiKey = process.env.EXOTEL_API_KEY;
@@ -57,7 +65,9 @@ app.post('/api/ivr/start-call', async (req, res) => {
   if (apiKey && apiToken && accountSid) {
     try {
       // Exotel Outbound Connect API Endpoint
-      const exotelUrl = `https://${apiKey}:${apiToken}@${subdomain}/v1/Accounts/${accountSid}/Calls/connect.json`;
+      const exotelUrl = `https://${subdomain}/v1/Accounts/${accountSid}/Calls/connect.json`;
+      
+      const authHeader = 'Basic ' + Buffer.from(apiKey + ':' + apiToken).toString('base64');
       
       const params = new URLSearchParams();
       params.append('From', targetPhone);
@@ -70,7 +80,10 @@ app.post('/api/ivr/start-call', async (req, res) => {
 
       const response = await fetch(exotelUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': authHeader
+        },
         body: params
       });
 
@@ -110,10 +123,12 @@ app.post('/api/ivr/start-call', async (req, res) => {
 });
 
 // Exotel Webhook (Plays prompts and gathers responses using Exotel XML format)
-app.post('/api/ivr/webhook', (req, res) => {
-  const sessionId = req.query.sessionId;
-  // Exotel returns digits pressed in the "Digits" parameter during Gather
-  const digits = req.body.Digits;
+app.all('/api/ivr/webhook', (req, res) => {
+  const sessionId = req.query.sessionId || req.body.sessionId || req.body.CustomField || req.query.CustomField || req.body.Status;
+  // Exotel returns digits pressed in the "Digits" or "digits" parameter
+  const digits = req.body.Digits || req.query.Digits || req.body.digits || req.query.digits;
+
+  console.log(`Webhook received: sessionId=${sessionId}, digits=${digits}`);
 
   const session = activeSessions.get(sessionId);
 
@@ -129,7 +144,7 @@ app.post('/api/ivr/webhook', (req, res) => {
   }
 
   // If digits are returned from a previous step, save it
-  if (digits !== undefined && digits !== null) {
+  if (digits !== undefined && digits !== null && digits !== '') {
     const currentQ = questions[session.currentStep - 1];
     session.answers[currentQ.key] = digits;
     session.currentStep += 1;
@@ -144,11 +159,11 @@ app.post('/api/ivr/webhook', (req, res) => {
     // Generate Exotel XML response
     const xmlResponse = `
       <Response>
-        <Gather action="${gatherUrl}" method="POST" numDigits="${nextQ.key === 'pain_level' ? 2 : 1}" timeout="10">
+        <Gather action="${gatherUrl}" method="GET" numDigits="${nextQ.key === 'pain_level' ? 2 : 1}" timeout="10">
           <Say voice="female">${nextQ.text}</Say>
         </Gather>
         <Say voice="female">We did not receive any key input. Let us repeat.</Say>
-        <Redirect method="POST">${gatherUrl}</Redirect>
+        <Redirect method="GET">${gatherUrl}</Redirect>
       </Response>
     `;
     res.send(xmlResponse.trim());
@@ -166,8 +181,8 @@ app.post('/api/ivr/webhook', (req, res) => {
 });
 
 // Exotel status callback webhook
-app.post('/api/ivr/status-callback', (req, res) => {
-  console.log('Exotel Status Callback:', req.body);
+app.all('/api/ivr/status-callback', (req, res) => {
+  console.log('Exotel Status Callback:', req.body || req.query);
   res.send('OK');
 });
 
